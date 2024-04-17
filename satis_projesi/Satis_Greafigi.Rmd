@@ -1,0 +1,197 @@
+---
+title: "SATIS_URUN_PROJESI"
+output: html_document
+date: "2024-04-17"
+---
+
+Gerekli kutuphaneleri tanimlayip SQLite veritabanina baglandik
+```{r setup, include=FALSE}
+library(RSQLite)
+library(ggplot2)
+library(readxl)
+library(testthat)
+# SQLite veritabanına bağlanın
+con <- dbConnect(RSQLite::SQLite(), dbname = "veritabani.db")
+```
+
+## 1. Adım: Tabloları SQL veritabanına aktarın
+```{r cars}
+# İlk CSV dosyasını okuyun
+data1 <- read_excel("urunler.xlsx")
+# İkinci CSV dosyasını okuyun
+data2 <- read_excel("satislar.xlsx")
+head(data1)
+head(data2)
+```
+
+## 2. Adım: Tabloları SQL veritabanına yazin
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+# İlk tabloyu veritabanına yazın
+dbWriteTable(con, "tablo1", data1, overwrite = TRUE)
+# İkinci tabloyu veritabanına yazın
+dbWriteTable(con, "tablo2", data2, overwrite = TRUE)
+```
+
+
+## 3. Adım: Tablolarin sutun isimlerini kontrol edip Join islemi uygulayin
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+#tablolarin sutun isimlerini kontrol et
+dbListFields(con, "tablo1")
+dbListFields(con, "tablo2")
+head(data2)
+# JOIN işlemi için SQL sorgusu
+join_query <- "
+  SELECT *
+  FROM tablo1 
+  INNER JOIN tablo2 
+  ON tablo1.Ürün_ID = tablo2.Ürün_ID"
+
+# Sorguyu çalıştırın ve sonucu alın
+result <- dbGetQuery(con, join_query)
+result[10] <- data2[4]
+print(result)
+```
+
+```{r}
+library(testthat)
+testthat::test_that("Global Workspace'de 'result' adli bir değişken olmalı", {
+  expect_true(exists("result"))
+})
+
+testthat::test_that("'result' adli değişkenin tipi 'data.frame' olmalı", {
+  expect_true("data.frame" %in% class(result))
+})
+```
+
+## 4. Adım: Veri Kalite Kontrolü
+
+### Zaman sütunu
+Zaman değerlerini içeren sütunun isminin **Time** olmasını sağlayın
+
+```{r pressure, echo=FALSE}
+ #  <kodu tamamla>
+print(colnames(result))
+colnames(result)[10] <- "Time"
+print(colnames(result))
+print(result)
+```
+
+*result$Time* adlı değişkendeki bütün verilerin **POSIXct** tipinde olmasını sağlayın. 
+```{r}
+# <kodu tamamla>
+result$Time <- as.POSIXct(result$Time)
+class(result$Time)
+print(result)
+```
+
+##TEST
+```{r}
+testthat::test_that("'result' adli değişkenin tipi 'data.frame' olmalı", {
+  expect_true("POSIXct" %in% class(result$Time))
+})  
+
+true_colnames <- dput(colnames(result), file = ".colnames")
+test_that("data.frame column names should be right", {
+  expect_equal(colnames(result), true_colnames)
+})
+```
+
+## 5. Adım:  Sutun adlari kontrolu
+
+' Satış Miktarı' adında bir sütun var mı kontrol edin
+
+```{r pressure, echo=FALSE}
+# ' Satış Miktarı' adında bir sütun var mı kontrol edin
+if ("Satış Miktarı" %in% colnames(result)) {
+  print("Aradiginiz sütun mevcut.")
+} else {
+  print("Aradiginiz sütun mevcut değil.")
+}
+```
+
+## 6. Adım:  GRAFIK 1
+
+```{r pressure, echo=FALSE}
+ library(dygraphs)
+# NA değerleri mean ile doldurup grafik çıkartma
+library(dygraphs)
+library(utf8)
+library(zoo)
+library(xts)
+
+
+print(result)
+# NA değerlerini sütun ortalaması ile dolduran bir fonksiyon TANIMLANIR.
+fill_na_with_mean <- function(column) {
+  column[is.na(column)] <- mean(column, na.rm = TRUE)
+  return(column)
+}
+
+# result veri çerçevesinin tüm sütunlarını kopyalayan bir kopya oluşturulur ve result_filled_mean adı verilir (ORJINALI BOZMAMAK ICIN)
+result_filled_mean <- result
+print(result_filled_mean)
+# fill_na_with_mean fonksiyonu kullanılarak result_filled_mean veri çerçevesinin tüm sütunlarındaki "NA" değerleri doldurulur
+#result_filled_mean[,-1] <- sapply(result[,-1], fill_na_with_mean)
+
+# Zaman sütunundaki NA değerlerini temizle. CUNKU;
+#(YUKARIDA SADECE VERILERI "NA" OLANLARLA ILGILENMISTIK YANI TARIHI "NA" OLANLAR HALA DURUYOR)
+# complate.cases fonksiyonu "NA" olmayan satirlari TRUE olarak dondurur
+cleaned_time <- result_filled_mean$Time[complete.cases(result_filled_mean$Time)]
+print(cleaned_time)
+class(cleaned_time)
+cleaned_time <- as.POSIXct(cleaned_time)
+
+format(cleaned_time)
+
+# Temizlenmiş zaman etiketleriyle veri çerçevesini alt kümeleyin
+# "Time" sütununda NA olmayan tüm satırları seçer ve 
+# bu satırların "Time", "Satış Miktarı" ve "Fiyat" sütunlarını içeren 
+# bir alt veri çerçevesi oluşturur. 
+# Bu, cleaned_data adlı yeni bir veri çerçevesine atanır.
+cleaned_data <- result_filled_mean[complete.cases(result_filled_mean$Time), c("Time", "Satış Miktarı", "Fiyat")]
+
+# XTS nesnesini oluştur.
+## ORDER.BY , timestamp saglayan bir vektordur. 
+  #  "NA" lari ayiklanmis time data frame inden yararlandik
+cleaned_time <- cleaned_time[complete.cases(cleaned_time)]
+print(cleaned_data)
+print(cleaned_time)
+# cleaned_time vektörü, zaman damgalarını içerir ve bu durumda 
+# cleaned_data veri çerçevesindeki gözlemlerin zamanını belirtir. 
+# gözlemlerin cleaned_time vektöründe belirtilen zaman sırasına göre düzenleneceğini belirtir
+result_xts_mean <- xts(cleaned_data[, c("Satış Miktarı", "Fiyat")], order.by = cleaned_time)
+
+# Dygraph ile havaK_xts_inter veri nesnesini kullanarak bir grafik oluşturulur
+dygraph(result_xts_mean, main = "Satis Hacmi (Mean)") %>%
+  # Grafik seçenekleri ayarlanır: renkler, eksen etiketleri, bağımsız eksenler
+  dyOptions(colors = c("blue", "red")) %>%
+  dyAxis("y", label = "Satış Miktarı") %>%
+  dyAxis("y2", label = "Fiyat", independentTicks = TRUE) %>%
+  # NO2 verisi için ayrı bir eksen eklenir
+  dySeries(names(result_xts_mean)[2], axis = 'y2')
+
+
+```
+
+## Son. Adım:  sutun grafigi
+
+' Satış Miktarı' adında bir sütun grafigi
+
+```{r pressure, echo=FALSE}
+# 3. Adım: Sonucu kullanarak grafik oluşturun
+print(result)
+?ggplot
+# Örnek: Sonucu kullanarak bir çubuk grafik oluşturun
+ggplot(result, aes(x = Time, y = `Satış Miktarı`)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "SATISLAR", x = "Zaman", y = "Satis Skoru") +
+  theme_minimal()
+
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
